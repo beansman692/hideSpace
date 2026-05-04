@@ -5,31 +5,48 @@
   <title>HideSpace</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-  <!-- QR generator -->
-  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+  <!-- Leaflet map -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
 
-  <!-- jsQR scanner -->
+  <!-- QR generator + scanner -->
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 
   <style>
     body { margin:0; font-family:system-ui, sans-serif; background:#05060a; color:#f5f5f5; display:flex; justify-content:center; align-items:center; min-height:100vh; }
-    .screen { display:none; width:100%; max-width:420px; padding:20px; box-sizing:border-box; }
+    .screen { display:none; width:100%; max-width:900px; padding:16px; box-sizing:border-box; }
     .screen.active { display:block; }
-    h1,h2,h3 { margin:0 0 16px; }
-    input,button { width:100%; padding:12px; margin:8px 0; border-radius:8px; border:none; font-size:16px; box-sizing:border-box; }
+    h1,h2,h3 { margin:0 0 12px; }
+    input,button { width:100%; padding:10px; margin:6px 0; border-radius:8px; border:none; font-size:15px; box-sizing:border-box; }
     input { background:#11131b; color:#f5f5f5; }
-    button { background:#3b82f6; color:white; font-weight:600; }
+    button { background:#3b82f6; color:white; font-weight:600; cursor:pointer; }
     button.secondary { background:#1f2937; }
     .small { font-size:13px; opacity:0.8; }
     .row { display:flex; gap:8px; }
-    .row > button { flex:1; }
-    .player-row { display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid #11131b; }
-    .tag { font-size:12px; padding:4px 8px; border-radius:999px; cursor:pointer; }
+    .row > * { flex:1; }
+    .layout { display:flex; gap:12px; }
+    .col { flex:1; min-width:0; }
+    .panel { background:#0b0d14; border-radius:12px; padding:10px; box-sizing:border-box; }
+    .player-row { display:flex; justify-content:space-between; align-items:center; padding:4px 0; border-bottom:1px solid #11131b; font-size:14px; }
+    .tag { font-size:11px; padding:3px 7px; border-radius:999px; cursor:pointer; margin-left:6px; }
     .tag.hider { background:#22c55e22; color:#22c55e; }
     .tag.seeker { background:#ef444422; color:#ef4444; }
-    #qrHostCanvas { width:100%; max-width:320px; margin:12px auto; display:block; background:#000; border-radius:12px; }
-    #qrScanner { margin-top:12px; }
-    #qrVideo { width:100%; border-radius:12px; background:#000; }
+    .tag.self { background:#3b82f622; color:#3b82f6; }
+    #mapHost, #mapPlayer { width:100%; height:320px; border-radius:12px; }
+    #qrHostCanvas, #qrPlayerCanvas { width:100%; max-width:260px; margin:8px auto; display:block; background:#000; border-radius:12px; }
+    #qrScannerHost, #qrScannerPlayer { margin-top:8px; }
+    video { width:100%; border-radius:12px; background:#000; }
+    #logHost, #logPlayer { font-size:12px; white-space:pre-wrap; background:#11131b; padding:6px; border-radius:8px; max-height:140px; overflow:auto; }
   </style>
 </head>
 <body>
@@ -50,46 +67,125 @@
   <p class="small">Base link:<br><span id="baseLink"></span></p>
 </div>
 
-<!-- Screen 3: host lobby -->
+<!-- Screen 3: host lobby + map -->
 <div id="screen-host" class="screen">
   <h2>Host Lobby</h2>
-  <p>Room URL:</p>
-  <p id="hostRoomUrl" style="word-break:break-all;"></p>
+  <div class="layout">
+    <div class="col">
+      <div class="panel">
+        <h3>Room</h3>
+        <p class="small">Room URL:</p>
+        <p id="hostRoomUrl" style="word-break:break-all;"></p>
+        <p class="small">4-letter code after last <code>/</code>.</p>
 
-  <h3>QR to join</h3>
-  <canvas id="qrHostCanvas"></canvas>
-  <p class="small">Players can scan this QR or open the link directly.</p>
+        <h3>WebRTC QR (per player)</h3>
+        <button id="btnHostNewOffer">New player QR (offer)</button>
+        <canvas id="qrHostCanvas"></canvas>
 
-  <h3>Players (local list)</h3>
-  <div id="playerList"></div>
+        <p class="small">After player shows answer QR, scan it:</p>
+        <button id="btnHostScanAnswer" class="secondary">Scan answer QR</button>
+        <div id="qrScannerHost" style="display:none;">
+          <video id="videoHost"></video>
+          <canvas id="canvasHost" style="display:none;"></canvas>
+          <button id="btnHostCloseScan" style="margin-top:6px;">Close scanner</button>
+        </div>
 
-  <button id="btnAddSelf">Add myself to list</button>
-  <button id="btnStartGame" style="margin-top:16px;">Start Game</button>
+        <h3>Host controls</h3>
+        <button id="btnStartGame">Start Game</button>
+      </div>
+
+      <div class="panel" style="margin-top:10px;">
+        <h3>Players</h3>
+        <div id="playerList"></div>
+        <p class="small">Tap role to toggle Hider/Seeker. Seekers are the ones chasing.</p>
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="panel">
+        <h3>Map (Host)</h3>
+        <div id="mapHost"></div>
+      </div>
+      <div class="panel" style="margin-top:10px;">
+        <h3>Log</h3>
+        <div id="logHost"></div>
+      </div>
+    </div>
+  </div>
 </div>
 
-<!-- Screen 4: join -->
+<!-- Screen 4: player join + map -->
 <div id="screen-join" class="screen">
   <h2>Join Game</h2>
-  <p class="small">You opened:<br><span id="currentUrl"></span></p>
-  <p class="small">If this URL ends with a 4‑letter code (like <code>/FJQP</code>), that’s your room.</p>
-  <button id="btnJoinConfirm">Join This Room</button>
-  <button id="btnScanQr" class="secondary">Scan Host QR</button>
+  <div class="layout">
+    <div class="col">
+      <div class="panel">
+        <h3>Room</h3>
+        <p class="small">You opened:<br><span id="currentUrl"></span></p>
+        <p class="small">If this URL ends with a 4‑letter code (like <code>/FJQP</code>), that’s your room.</p>
+        <button id="btnJoinConfirm">Use this room code</button>
 
-  <div id="qrScanner" style="display:none;">
-    <video id="qrVideo"></video>
-    <canvas id="qrCanvas" style="display:none;"></canvas>
-    <button id="qrCloseBtn" style="margin-top:12px;">Close Scanner</button>
+        <h3>WebRTC QR</h3>
+        <p class="small">Step 1: Scan host's offer QR.</p>
+        <button id="btnPlayerScanOffer">Scan host QR</button>
+        <div id="qrScannerPlayer" style="display:none;">
+          <video id="videoPlayer"></video>
+          <canvas id="canvasPlayer" style="display:none;"></canvas>
+          <button id="btnPlayerCloseScan" style="margin-top:6px;">Close scanner</button>
+        </div>
+
+        <p class="small">Step 2: Show your answer QR to host.</p>
+        <canvas id="qrPlayerCanvas"></canvas>
+
+        <h3>GPS</h3>
+        <p id="gpsCountdown" style="font-size:16px; text-align:center; margin-top:4px;">
+          Location reveals in: 45s
+        </p>
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="panel">
+        <h3>Map (You)</h3>
+        <div id="mapPlayer"></div>
+      </div>
+      <div class="panel" style="margin-top:10px;">
+        <h3>Log</h3>
+        <div id="logPlayer"></div>
+      </div>
+    </div>
   </div>
 </div>
 
 <script>
   const BASE_URL = "https://beansman692.github.io/hideSpace/";
   const LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+  const STUN_CONFIG = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
 
   let myName = "";
   let roomCode = "";
-  let players = [];
+  let isHost = false;
 
+  // Host WebRTC state
+  let hostPendingPc = null;
+  let hostPendingPlayerId = null;
+  const hostPeers = {}; // playerId -> { pc, dc }
+  const players = {};   // playerId -> { id, name, role, lat, lng, marker }
+
+  // Player WebRTC state
+  let pcPlayer = null;
+  let dcPlayer = null;
+  let playerId = null;
+
+  // GPS
+  let revealTimer = 45;
+  let gpsInterval = null;
+
+  // Maps
+  let mapHost = null;
+  let mapPlayer = null;
+
+  // DOM
   const screenName = document.getElementById("screen-name");
   const screenRole = document.getElementById("screen-role");
   const screenHost = document.getElementById("screen-host");
@@ -100,26 +196,49 @@
   const btnHost = document.getElementById("btnHost");
   const btnJoin = document.getElementById("btnJoin");
   const baseLink = document.getElementById("baseLink");
+
   const hostRoomUrl = document.getElementById("hostRoomUrl");
   const playerList = document.getElementById("playerList");
-  const btnAddSelf = document.getElementById("btnAddSelf");
   const btnStartGame = document.getElementById("btnStartGame");
+
   const currentUrl = document.getElementById("currentUrl");
   const btnJoinConfirm = document.getElementById("btnJoinConfirm");
-  const btnScanQr = document.getElementById("btnScanQr");
+
+  const gpsCountdown = document.getElementById("gpsCountdown");
+
   const qrHostCanvas = document.getElementById("qrHostCanvas");
+  const btnHostNewOffer = document.getElementById("btnHostNewOffer");
+  const btnHostScanAnswer = document.getElementById("btnHostScanAnswer");
+  const qrScannerHost = document.getElementById("qrScannerHost");
+  const videoHost = document.getElementById("videoHost");
+  const canvasHost = document.getElementById("canvasHost");
+  const btnHostCloseScan = document.getElementById("btnHostCloseScan");
+  const logHost = document.getElementById("logHost");
 
-  const qrScanner = document.getElementById("qrScanner");
-  const qrVideo = document.getElementById("qrVideo");
-  const qrCanvas = document.getElementById("qrCanvas");
-  const qrCloseBtn = document.getElementById("qrCloseBtn");
+  const btnPlayerScanOffer = document.getElementById("btnPlayerScanOffer");
+  const qrScannerPlayer = document.getElementById("qrScannerPlayer");
+  const videoPlayer = document.getElementById("videoPlayer");
+  const canvasPlayer = document.getElementById("canvasPlayer");
+  const btnPlayerCloseScan = document.getElementById("btnPlayerCloseScan");
+  const qrPlayerCanvas = document.getElementById("qrPlayerCanvas");
+  const logPlayer = document.getElementById("logPlayer");
 
-  let qrStream = null;
-  let qrLoop = null;
+  const mapHostDiv = document.getElementById("mapHost");
+  const mapPlayerDiv = document.getElementById("mapPlayer");
+
+  let hostScanLoop = null;
+  let hostStream = null;
+  let playerScanLoop = null;
+  let playerStream = null;
 
   function showScreen(el) {
     [screenName, screenRole, screenHost, screenJoin].forEach(s => s.classList.remove("active"));
     el.classList.add("active");
+  }
+
+  function log(el, msg) {
+    el.textContent += msg + "\n";
+    el.scrollTop = el.scrollHeight;
   }
 
   function getCode(len = 4) {
@@ -144,372 +263,352 @@
     return BASE_URL + encodeURIComponent(code);
   }
 
-  function renderPlayers() {
-    playerList.innerHTML = "";
-    players.forEach(p => {
-      const row = document.createElement("div");
-      row.className = "player-row";
-      const nameSpan = document.createElement("span");
-      nameSpan.textContent = p.name;
-      const tag = document.createElement("span");
-      tag.className = "tag " + (p.role === "seeker" ? "seeker" : "hider");
-      tag.textContent = p.role === "seeker" ? "Seeker" : "Hider";
-      tag.onclick = () => {
-        p.role = p.role === "seeker" ? "hider" : "seeker";
-        renderPlayers();
-      };
-      row.appendChild(nameSpan);
-      row.appendChild(tag);
-      playerList.appendChild(row);
-    });
-  }
-
-  function generateHostQr(url) {
-    const ctx = qrHostCanvas.getContext("2d");
-    const size = 320;
-    qrHostCanvas.width = size;
-    qrHostCanvas.height = size;
+  function drawQr(canvas, text) {
+    const ctx = canvas.getContext("2d");
+    const size = 260;
+    canvas.width = size;
+    canvas.height = size;
     ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, size, size);
-    QRCode.toCanvas(qrHostCanvas, url, { width: size, margin: 1 }, (err) => {
+    QRCode.toCanvas(canvas, text, { width: size, margin: 1 }, (err) => {
       if (err) console.error(err);
     });
   }
 
-  async function startQRScanner(onResult) {
+  async function startScanner(videoEl, canvasEl, onResult, onError) {
     try {
-      qrScanner.style.display = "block";
-      qrStream = await navigator.mediaDevices.getUserMedia({
+      const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "environment" }
       });
-      qrVideo.srcObject = qrStream;
-      qrVideo.setAttribute("playsinline", true);
-      await qrVideo.play();
+      videoEl.srcObject = stream;
+      videoEl.setAttribute("playsinline", true);
+      await videoEl.play();
 
-      const ctx = qrCanvas.getContext("2d");
-
-      qrLoop = setInterval(() => {
-        if (qrVideo.readyState !== qrVideo.HAVE_ENOUGH_DATA) return;
-
-        qrCanvas.width = qrVideo.videoWidth;
-        qrCanvas.height = qrVideo.videoHeight;
-
-        ctx.drawImage(qrVideo, 0, 0, qrCanvas.width, qrCanvas.height);
-
-        const imgData = ctx.getImageData(0, 0, qrCanvas.width, qrCanvas.height);
+      const ctx = canvasEl.getContext("2d");
+      const loop = setInterval(() => {
+        if (videoEl.readyState !== videoEl.HAVE_ENOUGH_DATA) return;
+        canvasEl.width = videoEl.videoWidth;
+        canvasEl.height = videoEl.videoHeight;
+        ctx.drawImage(videoEl, 0, 0, canvasEl.width, canvasEl.height);
+        const imgData = ctx.getImageData(0, 0, canvasEl.width, canvasEl.height);
         const code = jsQR(imgData.data, imgData.width, imgData.height);
-
         if (code && code.data) {
-          stopQRScanner();
+          clearInterval(loop);
+          stream.getTracks().forEach(t => t.stop());
           onResult(code.data);
         }
       }, 120);
+      return { loop, stream };
     } catch (e) {
-      alert("Camera error: " + e.message);
-      stopQRScanner();
+      onError(e);
+      return null;
     }
   }
 
-  function stopQRScanner() {
-    qrScanner.style.display = "none";
-    clearInterval(qrLoop);
-    if (qrStream) {
-      qrStream.getTracks().forEach(t => t.stop());
+  function renderPlayers() {
+    playerList.innerHTML = "";
+    Object.values(players).forEach(p => {
+      const row = document.createElement("div");
+      row.className = "player-row";
+      const left = document.createElement("span");
+      left.textContent = p.name;
+      if (p.id === "host") {
+        const selfTag = document.createElement("span");
+        selfTag.className = "tag self";
+        selfTag.textContent = "Host";
+        left.appendChild(selfTag);
+      }
+      const roleTag = document.createElement("span");
+      roleTag.className = "tag " + (p.role === "seeker" ? "seeker" : "hider");
+      roleTag.textContent = p.role === "seeker" ? "Seeker" : "Hider";
+      roleTag.onclick = () => {
+        p.role = p.role === "seeker" ? "hider" : "seeker";
+        renderPlayers();
+        broadcastState();
+      };
+      row.appendChild(left);
+      row.appendChild(roleTag);
+      playerList.appendChild(row);
+    });
+  }
+
+  function initHostMap() {
+    if (mapHost) return;
+    mapHost = L.map(mapHostDiv).setView([56.1, -3.2], 13);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19
+    }).addTo(mapHost);
+  }
+
+  function initPlayerMap() {
+    if (mapPlayer) return;
+    mapPlayer = L.map(mapPlayerDiv).setView([56.1, -3.2], 13);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19
+    }).addTo(mapPlayer);
+  }
+
+  function updatePlayerMarkerHost(p) {
+    if (!mapHost || p.lat == null || p.lng == null) return;
+    if (!p.marker) {
+      p.marker = L.circleMarker([p.lat, p.lng], {
+        radius: 6,
+        color: p.role === "seeker" ? "#ef4444" : "#22c55e",
+        fillColor: p.role === "seeker" ? "#ef4444" : "#22c55e",
+        fillOpacity: 0.8
+      }).addTo(mapHost).bindPopup(p.name + " (" + p.role + ")");
+    } else {
+      p.marker.setLatLng([p.lat, p.lng]);
+      p.marker.setStyle({
+        color: p.role === "seeker" ? "#ef4444" : "#22c55e",
+        fillColor: p.role === "seeker" ? "#ef4444" : "#22c55e"
+      });
     }
   }
 
-  qrCloseBtn.onclick = stopQRScanner;
-
-  baseLink.textContent = BASE_URL;
-
-  btnNameContinue.onclick = () => {
-    const name = usernameInput.value.trim();
-    if (!name) return alert("Enter a username");
-    myName = name;
-    showScreen(screenRole);
-  };
-
-  btnHost.onclick = () => {
-    roomCode = getCode(4);
-    const newUrl = buildRoomUrl(roomCode);
-    hostRoomUrl.textContent = newUrl;
-
-    if (window.history && window.history.replaceState) {
-      window.history.replaceState({}, "", newUrl);
-    }
-
-    players = [];
-    renderPlayers();
-
-    generateHostQr(newUrl);
-
-    showScreen(screenHost);
-  };
-
-  btnAddSelf.onclick = () => {
-    if (!myName) return;
-    if (!players.find(p => p.id === "self")) {
-      players.push({ id: "self", name: myName, role: "seeker" });
-      renderPlayers();
-    }
-  };
-
-  btnStartGame.onclick = () => {
-    alert("Game start (local demo).\nPlayers: " +
-      players.map(p => `${p.name} (${p.role})`).join(", "));
-  };
-
-  btnJoin.onclick = () => {
-    currentUrl.textContent = window.location.href;
-    showScreen(screenJoin);
-  };
-
-  btnJoinConfirm.onclick = () => {
-    const code = getRoomFromUrl();
-    if (!code) {
-      alert("This URL has no 4‑letter room code at the end.\nAsk the host to send you their link or QR.");
-      return;
-    }
-    roomCode = code;
-    alert("Joined room: " + roomCode + "\n(You’re on the join side; host still controls the lobby on their device.)");
-  };
-
-  btnScanQr.onclick = () => {
-    startQRScanner((data) => {
-      if (data.startsWith(BASE_URL)) {
-        window.location.href = data;
+  function updateMapPlayerSide(playersState) {
+    if (!mapPlayer) return;
+    Object.values(playersState).forEach(p => {
+      if (p.lat == null || p.lng == null) return;
+      if (!p._marker) {
+        p._marker = L.circleMarker([p.lat, p.lng], {
+          radius: 6,
+          color: p.role === "seeker" ? "#ef4444" : "#22c55e",
+          fillColor: p.role === "seeker" ? "#ef4444" : "#22c55e",
+          fillOpacity: 0.8
+        }).addTo(mapPlayer).bindPopup(p.name + " (" + p.role + ")");
       } else {
-        alert("QR doesn’t look like a HideSpace link:\n" + data);
+        p._marker.setLatLng([p.lat, p.lng]);
+        p._marker.setStyle({
+          color: p.role === "seeker" ? "#ef4444" : "#22c55e",
+          fillColor: p.role === "seeker" ? "#ef4444" : "#22c55e"
+        });
       }
     });
-  };
-</script>
-</body>
-</html>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <title>HideSpace</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <!-- QR generator -->
-  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
-  <!-- jsQR scanner -->
-  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
-  <style>
-    body { margin:0; font-family:system-ui, sans-serif; background:#05060a; color:#f5f5f5; display:flex; justify-content:center; align-items:center; min-height:100vh; }
-    .screen { display:none; width:100%; max-width:420px; padding:20px; box-sizing:border-box; }
-    .screen.active { display:block; }
-    h1,h2,h3 { margin:0 0 16px; }
-    input,button { width:100%; padding:12px; margin:8px 0; border-radius:8px; border:none; font-size:16px; box-sizing:border-box; }
-    input { background:#11131b; color:#f5f5f5; }
-    button { background:#3b82f6; color:white; font-weight:600; }
-    button.secondary { background:#1f2937; }
-    .small { font-size:13px; opacity:0.8; }
-    .row { display:flex; gap:8px; }
-    .row > button { flex:1; }
-    .player-row { display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid #11131b; }
-    .tag { font-size:12px; padding:4px 8px; border-radius:999px; cursor:pointer; }
-    .tag.hider { background:#22c55e22; color:#22c55e; }
-    .tag.seeker { background:#ef444422; color:#ef4444; }
-    #qrHostCanvas { width:100%; max-width:320px; margin:12px auto; display:block; background:#000; border-radius:12px; }
-    #qrScanner { margin-top:12px; }
-    #qrVideo { width:100%; border-radius:12px; background:#000; }
-  </style>
-</head>
-<body>
-
-<!-- Screen 1: username -->
-<div id="screen-name" class="screen active">
-  <h1>HideSpace</h1>
-  <p>Enter a username to start.</p>
-  <input id="username" placeholder="Username" autocomplete="off" />
-  <button id="btnNameContinue">Continue</button>
-</div>
-
-<!-- Screen 2: host or join -->
-<div id="screen-role" class="screen">
-  <h2>What do you want to do?</h2>
-  <button id="btnHost">Host Game</button>
-  <button id="btnJoin" class="secondary">Join Game</button>
-  <p class="small">Base link:<br><span id="baseLink"></span></p>
-</div>
-
-<!-- Screen 3: host lobby -->
-<div id="screen-host" class="screen">
-  <h2>Host Lobby</h2>
-  <p>Room URL:</p>
-  <p id="hostRoomUrl" style="word-break:break-all;"></p>
-
-  <h3>QR to join</h3>
-  <canvas id="qrHostCanvas"></canvas>
-  <p class="small">Players can scan this QR or open the link directly.</p>
-
-  <h3>Players (local list)</h3>
-  <div id="playerList"></div>
-
-  <button id="btnAddSelf">Add myself to list</button>
-  <button id="btnStartGame" style="margin-top:16px;">Start Game</button>
-</div>
-
-<!-- Screen 4: join -->
-<div id="screen-join" class="screen">
-  <h2>Join Game</h2>
-  <p class="small">You opened:<br><span id="currentUrl"></span></p>
-  <p class="small">If this URL ends with a 4‑letter code (like <code>/FJQP</code>), that’s your room.</p>
-  <button id="btnJoinConfirm">Join This Room</button>
-  <button id="btnScanQr" class="secondary">Scan Host QR</button>
-
-  <div id="qrScanner" style="display:none;">
-    <video id="qrVideo"></video>
-    <canvas id="qrCanvas" style="display:none;"></canvas>
-    <button id="qrCloseBtn" style="margin-top:12px;">Close Scanner</button>
-  </div>
-</div>
-
-<script>
-  const BASE_URL = "https://beansman692.github.io/hideSpace/";
-  const LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ"; // no I/O to avoid confusion
-
-  let myName = "";
-  let roomCode = "";
-  let players = [];
-
-  const screenName = document.getElementById("screen-name");
-  const screenRole = document.getElementById("screen-role");
-  const screenHost = document.getElementById("screen-host");
-  const screenJoin = document.getElementById("screen-join");
-
-  const usernameInput = document.getElementById("username");
-  const btnNameContinue = document.getElementById("btnNameContinue");
-  const btnHost = document.getElementById("btnHost");
-  const btnJoin = document.getElementById("btnJoin");
-  const baseLink = document.getElementById("baseLink");
-  const hostRoomUrl = document.getElementById("hostRoomUrl");
-  const playerList = document.getElementById("playerList");
-  const btnAddSelf = document.getElementById("btnAddSelf");
-  const btnStartGame = document.getElementById("btnStartGame");
-  const currentUrl = document.getElementById("currentUrl");
-  const btnJoinConfirm = document.getElementById("btnJoinConfirm");
-  const btnScanQr = document.getElementById("btnScanQr");
-  const qrHostCanvas = document.getElementById("qrHostCanvas");
-
-  // QR scanner elements
-  const qrScanner = document.getElementById("qrScanner");
-  const qrVideo = document.getElementById("qrVideo");
-  const qrCanvas = document.getElementById("qrCanvas");
-  const qrCloseBtn = document.getElementById("qrCloseBtn");
-  let qrStream = null;
-  let qrLoop = null;
-
-  function showScreen(el) {
-    [screenName, screenRole, screenHost, screenJoin].forEach(s => s.classList.remove("active"));
-    el.classList.add("active");
   }
 
-  function getCode(len = 4) {
-    let out = "";
-    for (let i = 0; i < len; i++) {
-      out += LETTERS[Math.floor(Math.random() * LETTERS.length)];
-    }
-    return out;
-  }
-
-  function getRoomFromUrl() {
-    const url = new URL(window.location.href);
-    const parts = url.pathname.split("/");
-    let last = parts[parts.length - 1];
-    if (!last) last = parts[parts.length - 2] || "";
-    last = last.trim().toUpperCase();
-    if (/^[A-Z]{4}$/.test(last)) return last;
-    return "";
-  }
-
-  function buildRoomUrl(code) {
-    return BASE_URL + encodeURIComponent(code);
-  }
-
-  function renderPlayers() {
-    playerList.innerHTML = "";
-    players.forEach(p => {
-      const row = document.createElement("div");
-      row.className = "player-row";
-      const nameSpan = document.createElement("span");
-      nameSpan.textContent = p.name;
-      const tag = document.createElement("span");
-      tag.className = "tag " + (p.role === "seeker" ? "seeker" : "hider");
-      tag.textContent = p.role === "seeker" ? "Seeker" : "Hider";
-      tag.onclick = () => {
-        p.role = p.role === "seeker" ? "hider" : "seeker";
-        renderPlayers();
-      };
-      row.appendChild(nameSpan);
-      row.appendChild(tag);
-      playerList.appendChild(row);
+  function broadcastState() {
+    const state = {
+      type: "state",
+      players: Object.fromEntries(
+        Object.entries(players).map(([id, p]) => [id, {
+          id: p.id,
+          name: p.name,
+          role: p.role,
+          lat: p.lat,
+          lng: p.lng
+        }])
+      )
+    };
+    const msg = JSON.stringify(state);
+    Object.values(hostPeers).forEach(peer => {
+      if (peer.dc && peer.dc.readyState === "open") {
+        peer.dc.send(msg);
+      }
     });
   }
 
-  function generateHostQr(url) {
-    const ctx = qrHostCanvas.getContext("2d");
-    const size = 320;
-    qrHostCanvas.width = size;
-    qrHostCanvas.height = size;
-    ctx.fillStyle = "#000";
-    ctx.fillRect(0, 0, size, size);
-    QRCode.toCanvas(qrHostCanvas, url, { width: size, margin: 1 }, (err) => {
-      if (err) console.error(err);
-    });
-  }
-
-  // jsQR scanner
-  async function startQRScanner(onResult) {
+  function handleHostMessage(playerId, msg) {
     try {
-      qrScanner.style.display = "block";
-      qrStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" }
-      });
-      qrVideo.srcObject = qrStream;
-      qrVideo.setAttribute("playsinline", true);
-      await qrVideo.play();
-
-      const ctx = qrCanvas.getContext("2d");
-
-      qrLoop = setInterval(() => {
-        if (qrVideo.readyState !== qrVideo.HAVE_ENOUGH_DATA) return;
-
-        qrCanvas.width = qrVideo.videoWidth;
-        qrCanvas.height = qrVideo.videoHeight;
-
-        ctx.drawImage(qrVideo, 0, 0, qrCanvas.width, qrCanvas.height);
-
-        const imgData = ctx.getImageData(0, 0, qrCanvas.width, qrCanvas.height);
-        const code = jsQR(imgData.data, imgData.width, imgData.height);
-
-        if (code && code.data) {
-          stopQRScanner();
-          onResult(code.data);
+      const data = JSON.parse(msg);
+      if (data.type === "pos") {
+        const p = players[playerId];
+        if (!p) return;
+        p.lat = data.lat;
+        p.lng = data.lng;
+        updatePlayerMarkerHost(p);
+        broadcastState();
+        log(logHost, "Pos from " + p.name);
+      } else if (data.type === "tag") {
+        // Simple tag broadcast
+        const taggedId = data.targetId;
+        const tagged = players[taggedId];
+        if (tagged) {
+          log(logHost, tagged.name + " was tagged!");
+          const evt = JSON.stringify({ type: "tagged", targetId: taggedId, name: tagged.name });
+          Object.values(hostPeers).forEach(peer => {
+            if (peer.dc && peer.dc.readyState === "open") {
+              peer.dc.send(evt);
+            }
+          });
         }
-      }, 120);
+      }
     } catch (e) {
-      alert("Camera error: " + e.message);
-      stopQRScanner();
+      console.error(e);
     }
   }
 
-  function stopQRScanner() {
-    qrScanner.style.display = "none";
-    clearInterval(qrLoop);
-    if (qrStream) {
-      qrStream.getTracks().forEach(t => t.stop());
+  function handlePlayerMessage(msg) {
+    try {
+      const data = JSON.parse(msg);
+      if (data.type === "state") {
+        updateMapPlayerSide(data.players);
+        log(logPlayer, "State update received");
+      } else if (data.type === "tagged") {
+        if (data.targetId === playerId) {
+          log(logPlayer, "You were tagged!");
+          alert("You were tagged!");
+        } else {
+          log(logPlayer, data.name + " was tagged");
+        }
+      }
+    } catch (e) {
+      console.error(e);
     }
   }
 
-  qrCloseBtn.onclick = stopQRScanner;
+  // Host WebRTC
+  async function hostCreateOffer() {
+    hostPendingPlayerId = "p_" + Math.random().toString(36).slice(2, 8);
+    const pc = new RTCPeerConnection(STUN_CONFIG);
+    const dc = pc.createDataChannel("game");
+    hostPendingPc = { pc, dc, id: hostPendingPlayerId };
+
+    dc.onopen = () => {
+      log(logHost, "DC open for " + hostPendingPlayerId);
+      // Add player record with placeholder name until answer arrives
+      players[hostPendingPlayerId] = {
+        id: hostPendingPlayerId,
+        name: "Player",
+        role: "hider",
+        lat: null,
+        lng: null,
+        marker: null
+      };
+      renderPlayers();
+      broadcastState();
+    };
+
+    dc.onmessage = (ev) => handleHostMessage(hostPendingPlayerId, ev.data);
+
+    pc.onicecandidate = (ev) => {
+      if (!ev.candidate) {
+        const offer = pc.localDescription;
+        const payload = JSON.stringify({
+          type: "offer",
+          sdp: offer.sdp,
+          playerId: hostPendingPlayerId,
+          roomCode,
+        });
+        drawQr(qrHostCanvas, payload);
+        log(logHost, "Offer ready, QR updated");
+      }
+    };
+
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    log(logHost, "Creating offer…");
+  }
+
+  async function hostApplyAnswer(answerJson) {
+    try {
+      const parsed = JSON.parse(answerJson);
+      if (parsed.type !== "answer" || !parsed.sdp || !parsed.playerId || !parsed.name) {
+        log(logHost, "Invalid answer QR");
+        return;
+      }
+      const id = parsed.playerId;
+      const pc = hostPendingPc && hostPendingPc.id === id ? hostPendingPc.pc : null;
+      const dc = hostPendingPc && hostPendingPc.id === id ? hostPendingPc.dc : null;
+      if (!pc || !dc) {
+        log(logHost, "No pending PC for this player");
+        return;
+      }
+      await pc.setRemoteDescription(new RTCSessionDescription({ type: "answer", sdp: parsed.sdp }));
+      log(logHost, "Answer applied for " + id);
+
+      // Finalize player record
+      players[id].name = parsed.name || "Player";
+      hostPeers[id] = { pc, dc };
+      hostPendingPc = null;
+      hostPendingPlayerId = null;
+      renderPlayers();
+      broadcastState();
+    } catch (e) {
+      log(logHost, "Failed to parse answer: " + e.message);
+    }
+  }
+
+  // Player WebRTC
+  async function playerHandleOffer(offerJson) {
+    try {
+      const parsed = JSON.parse(offerJson);
+      if (parsed.type !== "offer" || !parsed.sdp || !parsed.playerId) {
+        log(logPlayer, "Invalid offer QR");
+        return;
+      }
+      if (parsed.roomCode && !roomCode) {
+        roomCode = parsed.roomCode;
+      }
+      playerId = parsed.playerId;
+
+      pcPlayer = new RTCPeerConnection(STUN_CONFIG);
+      pcPlayer.ondatachannel = (ev) => {
+        dcPlayer = ev.channel;
+        dcPlayer.onopen = () => {
+          log(logPlayer, "DataChannel open");
+          // Start GPS loop
+          startGpsLoop();
+        };
+        dcPlayer.onmessage = (ev2) => handlePlayerMessage(ev2.data);
+      };
+
+      const offer = new RTCSessionDescription({ type: "offer", sdp: parsed.sdp });
+      await pcPlayer.setRemoteDescription(offer);
+      const answer = await pcPlayer.createAnswer();
+      await pcPlayer.setLocalDescription(answer);
+      log(logPlayer, "Created answer, gathering ICE…");
+
+      pcPlayer.onicecandidate = (ev) => {
+        if (!ev.candidate) {
+          const ans = pcPlayer.localDescription;
+          const payload = JSON.stringify({
+            type: "answer",
+            sdp: ans.sdp,
+            playerId,
+            name: myName || "Player"
+          });
+          drawQr(qrPlayerCanvas, payload);
+          log(logPlayer, "Answer ready, show QR to host");
+        }
+      };
+    } catch (e) {
+      log(logPlayer, "Failed to handle offer: " + e.message);
+    }
+  }
+
+  // GPS loop (player)
+  function startGpsLoop() {
+    if (gpsInterval) return;
+    revealTimer = 45;
+    gpsCountdown.textContent = "Location reveals in: " + revealTimer + "s";
+    gpsInterval = setInterval(() => {
+      revealTimer--;
+      if (revealTimer < 0) revealTimer = 0;
+      gpsCountdown.textContent = "Location reveals in: " + revealTimer + "s";
+      if (revealTimer === 0) {
+        revealTimer = 45;
+        if (!navigator.geolocation) return;
+        navigator.geolocation.getCurrentPosition(pos => {
+          const data = {
+            type: "pos",
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+            name: myName || "Player",
+            id: playerId
+          };
+          if (dcPlayer && dcPlayer.readyState === "open") {
+            dcPlayer.send(JSON.stringify(data));
+            log(logPlayer, "Sent GPS position");
+          }
+        });
+      }
+    }, 1000);
+  }
 
   // Init
   baseLink.textContent = BASE_URL;
 
-  // Username
   btnNameContinue.onclick = () => {
     const name = usernameInput.value.trim();
     if (!name) return alert("Enter a username");
@@ -517,43 +616,31 @@
     showScreen(screenRole);
   };
 
-  // Host flow
   btnHost.onclick = () => {
+    isHost = true;
     roomCode = getCode(4);
     const newUrl = buildRoomUrl(roomCode);
     hostRoomUrl.textContent = newUrl;
-
-    // Update URL without reload
     if (window.history && window.history.replaceState) {
       window.history.replaceState({}, "", newUrl);
     }
-
-    // Local players list – host can add themselves
-    players = [];
+    players["host"] = {
+      id: "host",
+      name: myName || "Host",
+      role: "seeker",
+      lat: null,
+      lng: null,
+      marker: null
+    };
     renderPlayers();
-
-    // Generate QR for room URL
-    generateHostQr(newUrl);
-
+    initHostMap();
     showScreen(screenHost);
   };
 
-  btnAddSelf.onclick = () => {
-    if (!myName) return;
-    if (!players.find(p => p.id === "self")) {
-      players.push({ id: "self", name: myName, role: "seeker" });
-      renderPlayers();
-    }
-  };
-
-  btnStartGame.onclick = () => {
-    alert("Game start (local demo).\nPlayers: " +
-      players.map(p => `${p.name} (${p.role})`).join(", "));
-  };
-
-  // Join flow
   btnJoin.onclick = () => {
+    isHost = false;
     currentUrl.textContent = window.location.href;
+    initPlayerMap();
     showScreen(screenJoin);
   };
 
@@ -564,18 +651,70 @@
       return;
     }
     roomCode = code;
-    alert("Joined room: " + roomCode + "\n(You’re on the join side; host still controls the lobby on their device.)");
+    alert("Using room: " + roomCode + "\nNow scan host's WebRTC QR.");
   };
 
-  btnScanQr.onclick = () => {
-    startQRScanner((data) => {
-      // Expect the QR to contain the full room URL
-      if (data.startsWith(BASE_URL)) {
-        window.location.href = data;
-      } else {
-        alert("QR doesn’t look like a HideSpace link:\n" + data);
+  // Host QR actions
+  btnHostNewOffer.onclick = () => {
+    hostCreateOffer();
+  };
+
+  btnHostScanAnswer.onclick = async () => {
+    qrScannerHost.style.display = "block";
+    const res = await startScanner(
+      videoHost,
+      canvasHost,
+      (data) => {
+        qrScannerHost.style.display = "none";
+        hostApplyAnswer(data);
+      },
+      (err) => {
+        qrScannerHost.style.display = "none";
+        log(logHost, "Camera error: " + err.message);
       }
-    });
+    );
+    if (res) {
+      hostScanLoop = res.loop;
+      hostStream = res.stream;
+    }
+  };
+
+  btnHostCloseScan.onclick = () => {
+    qrScannerHost.style.display = "none";
+    if (hostScanLoop) clearInterval(hostScanLoop);
+    if (hostStream) hostStream.getTracks().forEach(t => t.stop());
+  };
+
+  // Player QR actions
+  btnPlayerScanOffer.onclick = async () => {
+    qrScannerPlayer.style.display = "block";
+    const res = await startScanner(
+      videoPlayer,
+      canvasPlayer,
+      (data) => {
+        qrScannerPlayer.style.display = "none";
+        playerHandleOffer(data);
+      },
+      (err) => {
+        qrScannerPlayer.style.display = "none";
+        log(logPlayer, "Camera error: " + err.message);
+      }
+    );
+    if (res) {
+      playerScanLoop = res.loop;
+      playerStream = res.stream;
+    }
+  };
+
+  btnPlayerCloseScan.onclick = () => {
+    qrScannerPlayer.style.display = "none";
+    if (playerScanLoop) clearInterval(playerScanLoop);
+    if (playerStream) playerStream.getTracks().forEach(t => t.stop());
+  };
+
+  btnStartGame.onclick = () => {
+    log(logHost, "Game started");
+    broadcastState();
   };
 </script>
 </body>
