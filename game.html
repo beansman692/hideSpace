@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>HideSpace Game</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <!-- Leaflet map -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+
+  <!-- QR for offer URL -->
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+
+  <style>
+    body { margin:0; font-family:system-ui, sans-serif; background:#05060a; color:#f5f5f5; display:flex; flex-direction:column; min-height:100vh; }
+    header { padding:10px 12px; background:#020617; display:flex; justify-content:space-between; align-items:center; }
+    header h1 { margin:0; font-size:18px; }
+    header .room { font-size:13px; opacity:0.8; }
+    main { flex:1; display:flex; flex-direction:column; }
+    #map { flex:1; min-height:300px; }
+    .panel { padding:10px 12px; background:#020617; border-top:1px solid #111827; }
+    button { padding:8px 10px; border-radius:8px; border:none; font-size:14px; cursor:pointer; margin:4px 2px; }
+    button.primary { background:#3b82f6; color:#fff; }
+    button.secondary { background:#1f2937; color:#e5e7eb; }
+    .row { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-bottom:6px; }
+    .tag { padding:3px 8px; border-radius:999px; font-size:12px; }
+    .tag.seeker { background:#ef444422; color:#ef4444; }
+    .tag.hider { background:#22c55e22; color:#22c55e; }
+    .small { font-size:12px; opacity:0.8; }
+    #offerQrCanvas { width:180px; height:180px; background:#000; border-radius:12px; margin-top:8px; }
+    #log { max-height:120px; overflow:auto; font-size:11px; background:#020617; padding:6px; border-radius:6px; margin-top:6px; }
+  </style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>HideSpace</h1>
+    <div class="room" id="roomLabel"></div>
+  </div>
+  <div id="roleLabel" class="tag seeker">Seeker</div>
+</header>
+
+<main>
+  <div id="map"></div>
+
+  <div class="panel">
+    <div class="row">
+      <button id="btnToggleRole" class="secondary">Toggle role</button>
+      <button id="btnTag" class="primary">Tag nearest</button>
+      <button id="btnBack" class="secondary">Back</button>
+    </div>
+
+    <div class="row">
+      <button id="btnMakeOffer" class="primary">New player QR (offer)</button>
+    </div>
+    <canvas id="offerQrCanvas"></canvas>
+    <div class="small">Share this QR with a new player. They scan it to join.</div>
+
+    <div id="log"></div>
+  </div>
+</main>
+
+<script>
+  const LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+  const url = new URL(window.location.href);
+  const mode = url.searchParams.get("mode") || "host"; // host | join
+  const myName = decodeURIComponent(url.searchParams.get("name") || "Player");
+  let roomCode = url.searchParams.get("room") || "";
+  const offerParam = url.searchParams.get("offer") || "";
+  const answerParam = url.searchParams.get("answer") || "";
+
+  const roomLabel = document.getElementById("roomLabel");
+  const roleLabel = document.getElementById("roleLabel");
+  const btnToggleRole = document.getElementById("btnToggleRole");
+  const btnTag = document.getElementById("btnTag");
+  const btnBack = document.getElementById("btnBack");
+  const btnMakeOffer = document.getElementById("btnMakeOffer");
+  const offerQrCanvas = document.getElementById("offerQrCanvas");
+  const logEl = document.getElementById("log");
+
+  let isSeeker = true;
+  let map, myMarker;
+  let myLat = null, myLng = null;
+
+  // Very simple "multiplayer" state – in real WebRTC you'd sync this
+  const players = {}; // id -> {name, role, lat, lng, marker}
+
+  function log(msg) {
+    const line = document.createElement("div");
+    line.textContent = new Date().toLocaleTimeString() + " - " + msg;
+    logEl.prepend(line);
+  }
+
+  function getCode(len = 4) {
+    let out = "";
+    for (let i = 0; i < len; i++) {
+      out += LETTERS[Math.floor(Math.random() * LETTERS.length)];
+    }
+    return out;
+  }
+
+  function updateRoleLabel() {
+    roleLabel.textContent = isSeeker ? "Seeker" : "Hider";
+    roleLabel.className = "tag " + (isSeeker ? "seeker" : "hider");
+  }
+
+  function initRoom() {
+    if (mode === "host") {
+      if (!roomCode) roomCode = getCode(4);
+      roomLabel.textContent = `Host • Room ${roomCode} • ${myName}`;
+    } else if (mode === "join") {
+      roomLabel.textContent = `Join • Room ${roomCode} • ${myName}`;
+    } else {
+      roomLabel.textContent = `${myName}`;
+    }
+  }
+
+  function initMap() {
+    map = L.map("map").setView([56.1, -3.2], 14); // rough Fife
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "&copy; OpenStreetMap"
+    }).addTo(map);
+  }
+
+  function updateMyMarker() {
+    if (myLat == null || myLng == null) return;
+    if (!myMarker) {
+      myMarker = L.marker([myLat, myLng], { title: myName }).addTo(map);
+    } else {
+      myMarker.setLatLng([myLat, myLng]);
+    }
+    map.setView([myLat, myLng], map.getZoom());
+  }
+
+  function startGPS() {
+    if (!navigator.geolocation) {
+      log("Geolocation not supported");
+      return;
+    }
+    navigator.geolocation.watchPosition(
+      (pos) => {
+        myLat = pos.coords.latitude;
+        myLng = pos.coords.longitude;
+        updateMyMarker();
+        // here you'd send location over WebRTC
+      },
+      (err) => {
+        log("GPS error: " + err.message);
+      },
+      { enableHighAccuracy: true, maximumAge: 10000, timeout: 20000 }
+    );
+  }
+
+  // Tagging: just logs for now
+  btnTag.onclick = () => {
+    if (!isSeeker) {
+      alert("Only seekers can tag");
+      return;
+    }
+    log("Tag attempt (nearest player logic would go here)");
+  };
+
+  btnToggleRole.onclick = () => {
+    isSeeker = !isSeeker;
+    updateRoleLabel();
+    log("Role changed to " + (isSeeker ? "Seeker" : "Hider"));
+  };
+
+  btnBack.onclick = () => {
+    window.location.href = "index.html";
+  };
+
+  // --- Basic WebRTC skeleton (A2 style: offer via QR, answer via URL) ---
+
+  let pc = null;
+  let dc = null;
+
+  function createPeerConnection() {
+    pc = new RTCPeerConnection({
+      iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+    });
+    pc.onicecandidate = (e) => {
+      if (e.candidate) return; // wait for complete
+      if (pc.localDescription && pc.localDescription.type === "offer") {
+        const offerStr = btoa(JSON.stringify(pc.localDescription));
+        const joinUrl = `${location.origin}${location.pathname}?mode=join&name=${encodeURIComponent(myName)}&room=${roomCode}&offer=${encodeURIComponent(offerStr)}`;
+        log("Offer ready, generating QR");
+        QRCode.toCanvas(offerQrCanvas, joinUrl, { width: 180 }, (err) => {
+          if (err) log("QR error: " + err.message);
+        });
+      } else if (pc.localDescription && pc.localDescription.type === "answer") {
+        const ansStr = btoa(JSON.stringify(pc.localDescription));
+        const hostUrl = `${location.origin}${location.pathname}?mode=host&name=${encodeURIComponent(myName)}&room=${roomCode}&answer=${encodeURIComponent(ansStr)}`;
+        log("Answer ready, URL for host:\n" + hostUrl);
+        alert("Send this URL to the host:\n\n" + hostUrl);
+      }
+    };
+    pc.ondatachannel = (e) => {
+      dc = e.channel;
+      setupDataChannel();
+    };
+  }
+
+  function setupDataChannel() {
+    if (!dc) return;
+    dc.onopen = () => log("DataChannel open");
+    dc.onmessage = (e) => {
+      log("Received: " + e.data);
+      // here you'd merge remote state (players, positions, roles, etc.)
+    };
+  }
+
+  async function hostMakeOffer() {
+    createPeerConnection();
+    dc = pc.createDataChannel("game");
+    setupDataChannel();
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    log("Creating offer…");
+  }
+
+  async function joinWithOffer(offerStr) {
+    createPeerConnection();
+    const offer = JSON.parse(atob(offerStr));
+    await pc.setRemoteDescription(offer);
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    log("Created answer, show URL to host");
+  }
+
+  async function hostApplyAnswer(ansStr) {
+    if (!pc) {
+      createPeerConnection();
+    }
+    const answer = JSON.parse(atob(ansStr));
+    await pc.setRemoteDescription(answer);
+    log("Host applied answer, connection should establish");
+  }
+
+  btnMakeOffer.onclick = () => {
+    if (mode !== "host") {
+      alert("Only host can create offers");
+      return;
+    }
+    hostMakeOffer();
+  };
+
+  // --- Init flow ---
+
+  initRoom();
+  updateRoleLabel();
+  initMap();
+  startGPS();
+
+  // If joiner came with ?offer=...
+  if (mode === "join" && offerParam) {
+    log("Joining with offer from URL");
+    joinWithOffer(offerParam);
+  }
+
+  // If host reloaded with ?answer=...
+  if (mode === "host" && answerParam) {
+    log("Host applying answer from URL");
+    hostApplyAnswer(answerParam);
+  }
+</script>
+</body>
+</html>
