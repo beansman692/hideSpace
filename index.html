@@ -4,6 +4,10 @@
   <meta charset="UTF-8" />
   <title>HideSpace</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- QR generator -->
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+  <!-- jsQR scanner -->
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
   <style>
     body { margin:0; font-family:system-ui, sans-serif; background:#05060a; color:#f5f5f5; display:flex; justify-content:center; align-items:center; min-height:100vh; }
     .screen { display:none; width:100%; max-width:420px; padding:20px; box-sizing:border-box; }
@@ -20,10 +24,14 @@
     .tag { font-size:12px; padding:4px 8px; border-radius:999px; cursor:pointer; }
     .tag.hider { background:#22c55e22; color:#22c55e; }
     .tag.seeker { background:#ef444422; color:#ef4444; }
+    #qrHostCanvas { width:100%; max-width:320px; margin:12px auto; display:block; background:#000; border-radius:12px; }
+    #qrScanner { margin-top:12px; }
+    #qrVideo { width:100%; border-radius:12px; background:#000; }
   </style>
 </head>
 <body>
 
+<!-- Screen 1: username -->
 <div id="screen-name" class="screen active">
   <h1>HideSpace</h1>
   <p>Enter a username to start.</p>
@@ -31,6 +39,7 @@
   <button id="btnNameContinue">Continue</button>
 </div>
 
+<!-- Screen 2: host or join -->
 <div id="screen-role" class="screen">
   <h2>What do you want to do?</h2>
   <button id="btnHost">Host Game</button>
@@ -38,28 +47,36 @@
   <p class="small">Base link:<br><span id="baseLink"></span></p>
 </div>
 
+<!-- Screen 3: host lobby -->
 <div id="screen-host" class="screen">
   <h2>Host Lobby</h2>
   <p>Room URL:</p>
   <p id="hostRoomUrl" style="word-break:break-all;"></p>
-  <p class="small">Share this link or show a QR (A1/A2 wiring comes next).</p>
 
-  <h3>Players</h3>
+  <h3>QR to join</h3>
+  <canvas id="qrHostCanvas"></canvas>
+  <p class="small">Players can scan this QR or open the link directly.</p>
+
+  <h3>Players (local list)</h3>
   <div id="playerList"></div>
 
-  <div class="row" style="margin-top:16px;">
-    <button id="btnShowQrA1" class="secondary">QR (2‑way)</button>
-    <button id="btnShowQrA2" class="secondary">QR (1‑way)</button>
-  </div>
-
+  <button id="btnAddSelf">Add myself to list</button>
   <button id="btnStartGame" style="margin-top:16px;">Start Game</button>
 </div>
 
+<!-- Screen 4: join -->
 <div id="screen-join" class="screen">
   <h2>Join Game</h2>
   <p class="small">You opened:<br><span id="currentUrl"></span></p>
-  <p class="small">If this URL ends with a 4‑letter code (like <code>/FJQP</code>), you’re in that room.</p>
+  <p class="small">If this URL ends with a 4‑letter code (like <code>/FJQP</code>), that’s your room.</p>
   <button id="btnJoinConfirm">Join This Room</button>
+  <button id="btnScanQr" class="secondary">Scan Host QR</button>
+
+  <div id="qrScanner" style="display:none;">
+    <video id="qrVideo"></video>
+    <canvas id="qrCanvas" style="display:none;"></canvas>
+    <button id="qrCloseBtn" style="margin-top:12px;">Close Scanner</button>
+  </div>
 </div>
 
 <script>
@@ -67,7 +84,6 @@
   const LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ"; // no I/O to avoid confusion
 
   let myName = "";
-  let isHost = false;
   let roomCode = "";
   let players = [];
 
@@ -83,11 +99,20 @@
   const baseLink = document.getElementById("baseLink");
   const hostRoomUrl = document.getElementById("hostRoomUrl");
   const playerList = document.getElementById("playerList");
-  const btnShowQrA1 = document.getElementById("btnShowQrA1");
-  const btnShowQrA2 = document.getElementById("btnShowQrA2");
+  const btnAddSelf = document.getElementById("btnAddSelf");
   const btnStartGame = document.getElementById("btnStartGame");
   const currentUrl = document.getElementById("currentUrl");
   const btnJoinConfirm = document.getElementById("btnJoinConfirm");
+  const btnScanQr = document.getElementById("btnScanQr");
+  const qrHostCanvas = document.getElementById("qrHostCanvas");
+
+  // QR scanner elements
+  const qrScanner = document.getElementById("qrScanner");
+  const qrVideo = document.getElementById("qrVideo");
+  const qrCanvas = document.getElementById("qrCanvas");
+  const qrCloseBtn = document.getElementById("qrCloseBtn");
+  let qrStream = null;
+  let qrLoop = null;
 
   function showScreen(el) {
     [screenName, screenRole, screenHost, screenJoin].forEach(s => s.classList.remove("active"));
@@ -136,9 +161,67 @@
     });
   }
 
+  function generateHostQr(url) {
+    const ctx = qrHostCanvas.getContext("2d");
+    const size = 320;
+    qrHostCanvas.width = size;
+    qrHostCanvas.height = size;
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, size, size);
+    QRCode.toCanvas(qrHostCanvas, url, { width: size, margin: 1 }, (err) => {
+      if (err) console.error(err);
+    });
+  }
+
+  // jsQR scanner
+  async function startQRScanner(onResult) {
+    try {
+      qrScanner.style.display = "block";
+      qrStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment" }
+      });
+      qrVideo.srcObject = qrStream;
+      qrVideo.setAttribute("playsinline", true);
+      await qrVideo.play();
+
+      const ctx = qrCanvas.getContext("2d");
+
+      qrLoop = setInterval(() => {
+        if (qrVideo.readyState !== qrVideo.HAVE_ENOUGH_DATA) return;
+
+        qrCanvas.width = qrVideo.videoWidth;
+        qrCanvas.height = qrVideo.videoHeight;
+
+        ctx.drawImage(qrVideo, 0, 0, qrCanvas.width, qrCanvas.height);
+
+        const imgData = ctx.getImageData(0, 0, qrCanvas.width, qrCanvas.height);
+        const code = jsQR(imgData.data, imgData.width, imgData.height);
+
+        if (code && code.data) {
+          stopQRScanner();
+          onResult(code.data);
+        }
+      }, 120);
+    } catch (e) {
+      alert("Camera error: " + e.message);
+      stopQRScanner();
+    }
+  }
+
+  function stopQRScanner() {
+    qrScanner.style.display = "none";
+    clearInterval(qrLoop);
+    if (qrStream) {
+      qrStream.getTracks().forEach(t => t.stop());
+    }
+  }
+
+  qrCloseBtn.onclick = stopQRScanner;
+
+  // Init
   baseLink.textContent = BASE_URL;
 
-  // Username screen
+  // Username
   btnNameContinue.onclick = () => {
     const name = usernameInput.value.trim();
     if (!name) return alert("Enter a username");
@@ -148,19 +231,36 @@
 
   // Host flow
   btnHost.onclick = () => {
-    isHost = true;
     roomCode = getCode(4);
     const newUrl = buildRoomUrl(roomCode);
     hostRoomUrl.textContent = newUrl;
 
-    players = [{ id: "host", name: myName, role: "seeker" }]; // host default seeker
-    renderPlayers();
-
+    // Update URL without reload
     if (window.history && window.history.replaceState) {
       window.history.replaceState({}, "", newUrl);
     }
 
+    // Local players list – host can add themselves
+    players = [];
+    renderPlayers();
+
+    // Generate QR for room URL
+    generateHostQr(newUrl);
+
     showScreen(screenHost);
+  };
+
+  btnAddSelf.onclick = () => {
+    if (!myName) return;
+    if (!players.find(p => p.id === "self")) {
+      players.push({ id: "self", name: myName, role: "seeker" });
+      renderPlayers();
+    }
+  };
+
+  btnStartGame.onclick = () => {
+    alert("Game start (local demo).\nPlayers: " +
+      players.map(p => `${p.name} (${p.role})`).join(", "));
   };
 
   // Join flow
@@ -172,26 +272,22 @@
   btnJoinConfirm.onclick = () => {
     const code = getRoomFromUrl();
     if (!code) {
-      alert("This URL has no 4‑letter room code at the end.\nAsk the host to send you their link.");
+      alert("This URL has no 4‑letter room code at the end.\nAsk the host to send you their link or QR.");
       return;
     }
     roomCode = code;
-    // Here is where QR/WebRTC join logic will go.
-    alert("Joining room: " + roomCode + "\n(Next step: wire QR/WebRTC here.)");
+    alert("Joined room: " + roomCode + "\n(You’re on the join side; host still controls the lobby on their device.)");
   };
 
-  // QR buttons (placeholders for A1 + A2)
-  btnShowQrA1.onclick = () => {
-    alert("QR (2‑way) placeholder.\nWe’ll encode " + buildRoomUrl(roomCode) + " + WebRTC offer here.");
-  };
-
-  btnShowQrA2.onclick = () => {
-    alert("QR (1‑way) placeholder.\nWe’ll encode " + buildRoomUrl(roomCode) + " + quick‑join data here.");
-  };
-
-  btnStartGame.onclick = () => {
-    alert("Game start placeholder.\nPlayers: " + players.map(p => `${p.name} (${p.role})`).join(", "));
-    // Next: show map, tagging, timer, etc.
+  btnScanQr.onclick = () => {
+    startQRScanner((data) => {
+      // Expect the QR to contain the full room URL
+      if (data.startsWith(BASE_URL)) {
+        window.location.href = data;
+      } else {
+        alert("QR doesn’t look like a HideSpace link:\n" + data);
+      }
+    });
   };
 </script>
 </body>
