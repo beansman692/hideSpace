@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>ShiteSpace</title>
+  <title>HideSpace</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
   <!-- QR generator + scanner -->
@@ -50,6 +50,7 @@
 <!-- Screen 3: host lobby -->
 <div id="screen-host" class="screen">
   <h2>Host Lobby</h2>
+
   <p class="small">Room URL:</p>
   <p id="hostRoomUrl" style="word-break:break-all;"></p>
 
@@ -57,7 +58,7 @@
   <canvas id="qrHostCanvas"></canvas>
   <p class="small">Players can scan this QR or open the link directly.</p>
 
-  <h3>Players (local list)</h3>
+  <h3>Players</h3>
   <div id="playerList"></div>
 
   <button id="btnAddSelf">Add myself</button>
@@ -67,8 +68,10 @@
 <!-- Screen 4: join -->
 <div id="screen-join" class="screen">
   <h2>Join Game</h2>
+
   <p class="small">You opened:<br><span id="currentUrl"></span></p>
   <p class="small">If this URL ends with a 4‑letter code (like <code>/FJQP</code>), that’s your room.</p>
+
   <button id="btnJoinConfirm">Join This Room</button>
   <button id="btnScanQr" class="secondary">Scan Host QR</button>
 
@@ -285,7 +288,6 @@
 
   btnScanQr.onclick = () => {
     startQRScanner((data) => {
-      // For now we expect the QR to be a URL
       if (data.startsWith(BASE_URL)) {
         window.location.href = data;
       } else {
